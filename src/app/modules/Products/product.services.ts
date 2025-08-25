@@ -1,5 +1,7 @@
+import ApiError from "../../errors/AppError";
 import { IProduct } from "./product.interface";
 import productModel from "./product.model";
+import httpStatus from "http-status";
 
 const createProduct = async (payload: IProduct) => {
     const product = await productModel.create(payload);
@@ -45,11 +47,11 @@ const updateProduct = async (id: string, userId: string, updateData: Partial<IPr
     const product = await productModel.findById(id);
 
     if (!product) {
-        throw new Error("Product not found");
+        throw new ApiError(httpStatus.NOT_FOUND, "Product not found");
     }
 
-    if (product.userId.toString() !== userId) {
-        throw new Error("You are not authorized to update this product");
+    if (product.userId.toString() !== userId.toString()) {
+        throw new ApiError(httpStatus.FORBIDDEN, "You are not authorized to update this product");
     }
 
     Object.assign(product, updateData);
@@ -61,10 +63,13 @@ const updateProduct = async (id: string, userId: string, updateData: Partial<IPr
 const deleteProduct = async (id: string, userId: string) => {
     const product = await productModel.findById(id);
     if (!product) {
-        throw new Error("Product not found");
+        throw new ApiError(httpStatus.NOT_FOUND, "Product not found");
     }
-    if (product.userId.toString() !== userId) {
-        throw new Error("You are not authorized to delete this product");
+
+    console.log(product.userId.toString(), userId);
+
+    if (product.userId.toString() !== userId.toString()) {
+        throw new ApiError(httpStatus.FORBIDDEN, "You are not authorized to delete this product");
     }
 
     await product.deleteOne();

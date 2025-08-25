@@ -10,7 +10,7 @@ const productSchema = new Schema<IProduct>(
         discountPrice: { type: Number },
         category: { type: String },
         tags: { type: [String], default: [] },
-        images: { type: [String], required: true },
+        images: { type: [String], required: true, default: [] },
         stock: { type: Number, required: true },
         quantity: { type: Number, default: 0 },
     },
