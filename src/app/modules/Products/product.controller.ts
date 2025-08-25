@@ -5,7 +5,6 @@ import sendResponse from "../../utils/sendResponse";
 
 const createProduct = catchAsync(async (req: Request, res: Response) => {
     const userId = req.user?._id as string;
-    // console.log(req.body);
     const payload = { ...req.body, userId };
 
     const product = await productServices.createProduct(payload as any);
