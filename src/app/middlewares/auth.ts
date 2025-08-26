@@ -11,7 +11,7 @@ const auth = catchAsync(async (req: Request, res: Response, next: NextFunction) 
     if (token?.startsWith("Bearer ")) token = token.slice(7);
 
     if (!token) {
-        throw new ApiError(401, "Authentication failed: No token provided");
+        throw new ApiError(404, "Authentication failed: No token provided");
     }
 
     let decoded;
