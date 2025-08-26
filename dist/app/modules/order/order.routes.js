@@ -12,5 +12,5 @@ router.post("/create-checkout-session", auth_1.default, order_controllers_1.orde
 router.get("/my-orders", auth_1.default, order_controllers_1.orderController.getOrdersByUser);
 router.get("/:id", auth_1.default, order_controllers_1.orderController.getOrderById);
 router.get("/session/:sessionId", auth_1.default, order_controllers_1.orderController.getOrderBySessionId);
-router.post("/webhook", auth_1.default, express_1.default.raw({ type: "application/json" }), order_controllers_1.orderController.handleWebhook);
+// router.post("/webhook", express.raw({ type: "application/json" }), orderController.handleWebhook);
 exports.orderRoutes = router;

@@ -17,8 +17,9 @@ const order_services_1 = require("./order.services");
 const catchAsync_1 = __importDefault(require("../../utils/catchAsync"));
 const sendResponse_1 = __importDefault(require("../../utils/sendResponse"));
 const http_status_1 = __importDefault(require("http-status"));
+const AppError_1 = __importDefault(require("../../errors/AppError"));
 const createCheckoutSession = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    const { items } = req.body; // Array of { productId, quantity }
+    const { items } = req.body;
     const userId = req.user._id;
     const result = yield order_services_1.orderServices.createStripeCheckoutSession(userId, items);
     (0, sendResponse_1.default)(res, {
@@ -28,19 +29,50 @@ const createCheckoutSession = (0, catchAsync_1.default)((req, res, next) => __aw
         data: result,
     });
 }));
+// const handleWebhook = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+//     const sig = req.headers["stripe-signature"] as string;
+//     const result = await orderServices.handleStripeWebhook(sig, req.body);
+//     if (result) {
+//         sendResponse(res, {
+//             statusCode: httpStatus.OK,
+//             success: true,
+//             message: "Webhook handled successfully",
+//             data: result,
+//         });
+//     } else {
+//         res.status(200).json({ received: true });
+//     }
+// });
 const handleWebhook = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     const sig = req.headers["stripe-signature"];
-    const result = yield order_services_1.orderServices.handleStripeWebhook(sig, req.body);
-    if (result) {
-        (0, sendResponse_1.default)(res, {
-            statusCode: http_status_1.default.OK,
-            success: true,
-            message: "Webhook handled successfully",
-            data: result,
-        });
+    // ✅ Add validation for signature
+    if (!sig) {
+        throw new AppError_1.default(http_status_1.default.BAD_REQUEST, "Missing Stripe signature header");
     }
-    else {
-        res.status(200).json({ received: true });
+    // ✅ Add validation for webhook secret
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        throw new AppError_1.default(http_status_1.default.INTERNAL_SERVER_ERROR, "Stripe webhook secret not configured");
+    }
+    try {
+        const result = yield order_services_1.orderServices.handleStripeWebhook(sig, req.body);
+        if (result) {
+            (0, sendResponse_1.default)(res, {
+                statusCode: http_status_1.default.OK,
+                success: true,
+                message: "Webhook handled successfully",
+                data: result,
+            });
+        }
+        else {
+            // ✅ Always return 200 to Stripe to acknowledge webhook receipt
+            res.status(200).json({ received: true });
+        }
+    }
+    catch (error) {
+        console.error("Webhook controller error:", error);
+        // ✅ Still return 200 to Stripe even if we have an error
+        // This prevents Stripe from retrying continuously
+        res.status(200).json({ received: true, error: error });
     }
 }));
 const getOrdersByUser = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {

@@ -19,12 +19,18 @@ const AppError_1 = __importDefault(require("../../errors/AppError"));
 const order_model_1 = require("./order.model");
 const stripe_1 = __importDefault(require("../../config/stripe"));
 const config_1 = __importDefault(require("../../config"));
+const auth_model_1 = __importDefault(require("../auth/auth.model"));
 const createOrderIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
     const order = yield order_model_1.orderModel.create(payload);
     return order;
 });
 const createStripeCheckoutSession = (userId, items) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        // Get user details first
+        const user = yield auth_model_1.default.findById(userId);
+        if (!user) {
+            throw new AppError_1.default(http_status_1.default.BAD_REQUEST, "User not found");
+        }
         // Get product details for all items
         const productIds = items.map((item) => item.productId);
         const products = yield product_model_1.default.find({ _id: { $in: productIds } });
@@ -55,21 +61,24 @@ const createStripeCheckoutSession = (userId, items) => __awaiter(void 0, void 0,
             const product = products.find((p) => p._id.toString() === item.productId.toString());
             return total + ((product === null || product === void 0 ? void 0 : product.discountPrice) || (product === null || product === void 0 ? void 0 : product.price) || 0) * item.quantity;
         }, 0);
-        // Create Stripe checkout session
+        // Create Stripe checkout session WITH CUSTOMER INFO
         const session = yield stripe_1.default.checkout.sessions.create({
             payment_method_types: ["card"],
             line_items: lineItems,
             mode: "payment",
             success_url: `${config_1.default.client_url}/order-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${config_1.default.client_url}/`,
+            cancel_url: `${config_1.default.client_url}/order-cancel`,
+            customer_email: user.email,
             metadata: {
                 userId: userId.toString(),
-                items: JSON.stringify(items), // Store items in metadata for webhook
+                userEmail: user.email,
+                userName: user.name,
+                items: JSON.stringify(items),
             },
         });
-        // Create order in database with pending status
         const order = yield order_model_1.orderModel.create({
             userId,
+            orderId: `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             items,
             totalAmount,
             finalAmount: totalAmount,
@@ -89,28 +98,59 @@ const createStripeCheckoutSession = (userId, items) => __awaiter(void 0, void 0,
     }
 });
 const handleStripeWebhook = (sig, body) => __awaiter(void 0, void 0, void 0, function* () {
+    // console.log("Webhook signature:", sig);
+    // console.log("Webhook body length:", body.length);
     try {
         const event = stripe_1.default.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        // console.log("Event type:", event.type);
         if (event.type === "checkout.session.completed") {
             const session = event.data.object;
-            // Update order payment status
-            const order = yield order_model_1.orderModel.findOneAndUpdate({ stripeSessionId: session.id }, {
-                paymentStatus: "completed",
-                stripePaymentIntentId: session.payment_intent,
-            }, { new: true });
-            if (!order) {
-                throw new AppError_1.default(http_status_1.default.NOT_FOUND, "Order not found for this session");
+            // console.log("Session ID:", session.id);
+            // console.log("Payment status:", session.payment_status);
+            // ✅ Check if payment was actually successful
+            if (session.payment_status === "paid") {
+                // Update order payment status
+                const order = yield order_model_1.orderModel
+                    .findOneAndUpdate({ stripeSessionId: session.id }, {
+                    paymentStatus: "completed",
+                    orderStatus: "confirmed",
+                    stripePaymentIntentId: session.payment_intent,
+                }, { new: true })
+                    .populate("userId", "name email");
+                if (!order) {
+                    console.error("Order not found for session:", session.id);
+                    throw new AppError_1.default(http_status_1.default.NOT_FOUND, "Order not found for this session");
+                }
+                console.log("Order updated successfully:", order._id);
+                // Update product stock
+                for (const item of order.items) {
+                    yield product_model_1.default.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } }, { new: true });
+                    console.log("Stock updated for product:", item.productId);
+                }
+                return order;
             }
-            // Update product stock (reduce stock by ordered quantities)
-            for (const item of order.items) {
-                yield product_model_1.default.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } });
+            else {
+                console.log("Payment not completed, status:", session.payment_status);
+                return null;
             }
+        }
+        if (event.type === "checkout.session.async_payment_failed") {
+            const session = event.data.object;
+            console.log("Payment failed for session:", session.id);
+            const order = yield order_model_1.orderModel
+                .findOneAndUpdate({ stripeSessionId: session.id }, {
+                paymentStatus: "failed",
+                orderStatus: "cancelled",
+            }, { new: true })
+                .populate("userId", "name email");
             return order;
         }
+        console.log("Unhandled event type:", event.type);
         return null;
     }
     catch (error) {
-        throw new AppError_1.default(http_status_1.default.INTERNAL_SERVER_ERROR, "Webhook handling failed");
+        console.error("Error in handleStripeWebhook:", error);
+        throw new AppError_1.default(http_status_1.default.INTERNAL_SERVER_ERROR, `Webhook handling failed`);
     }
 });
 const getOrdersByUserFromDB = (userId_1, ...args_1) => __awaiter(void 0, [userId_1, ...args_1], void 0, function* (userId, page = 1, limit = 10) {

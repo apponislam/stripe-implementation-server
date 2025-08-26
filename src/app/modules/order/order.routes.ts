@@ -12,6 +12,6 @@ router.get("/:id", auth, orderController.getOrderById);
 
 router.get("/session/:sessionId", auth, orderController.getOrderBySessionId);
 
-router.post("/webhook", auth, express.raw({ type: "application/json" }), orderController.handleWebhook);
+// router.post("/webhook", express.raw({ type: "application/json" }), orderController.handleWebhook);
 
 export const orderRoutes = router;

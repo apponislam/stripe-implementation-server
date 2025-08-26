@@ -6,6 +6,7 @@ import { orderModel } from "./order.model";
 import { IOrder } from "./order.interface";
 import stripe from "../../config/stripe";
 import config from "../../config";
+import userModel from "../auth/auth.model";
 
 const createOrderIntoDB = async (payload: Omit<IOrder, "createdAt" | "updatedAt">) => {
     const order = await orderModel.create(payload);
@@ -14,6 +15,12 @@ const createOrderIntoDB = async (payload: Omit<IOrder, "createdAt" | "updatedAt"
 
 const createStripeCheckoutSession = async (userId: Types.ObjectId, items: Array<{ productId: Types.ObjectId; quantity: number }>) => {
     try {
+        // Get user details first
+        const user = await userModel.findById(userId);
+        if (!user) {
+            throw new ApiError(httpStatus.BAD_REQUEST, "User not found");
+        }
+
         // Get product details for all items
         const productIds = items.map((item) => item.productId);
         const products = await productModel.find({ _id: { $in: productIds } });
@@ -49,22 +56,25 @@ const createStripeCheckoutSession = async (userId: Types.ObjectId, items: Array<
             return total + (product?.discountPrice || product?.price || 0) * item.quantity;
         }, 0);
 
-        // Create Stripe checkout session
+        // Create Stripe checkout session WITH CUSTOMER INFO
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
             line_items: lineItems,
             mode: "payment",
             success_url: `${config.client_url}/order-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${config.client_url}/`,
+            cancel_url: `${config.client_url}/order-cancel`,
+            customer_email: user.email,
             metadata: {
                 userId: userId.toString(),
-                items: JSON.stringify(items), // Store items in metadata for webhook
+                userEmail: user.email,
+                userName: user.name,
+                items: JSON.stringify(items),
             },
         });
 
-        // Create order in database with pending status
         const order = await orderModel.create({
             userId,
+            orderId: `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             items,
             totalAmount,
             finalAmount: totalAmount,
@@ -84,38 +94,77 @@ const createStripeCheckoutSession = async (userId: Types.ObjectId, items: Array<
     }
 };
 
-const handleStripeWebhook = async (sig: string, body: any) => {
+const handleStripeWebhook = async (sig: string, body: Buffer) => {
+    // console.log("Webhook signature:", sig);
+    // console.log("Webhook body length:", body.length);
+
     try {
         const event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+        // console.log("Event type:", event.type);
 
         if (event.type === "checkout.session.completed") {
             const session = event.data.object;
+            // console.log("Session ID:", session.id);
+            // console.log("Payment status:", session.payment_status);
 
-            // Update order payment status
-            const order = await orderModel.findOneAndUpdate(
-                { stripeSessionId: session.id },
-                {
-                    paymentStatus: "completed",
-                    stripePaymentIntentId: session.payment_intent,
-                },
-                { new: true }
-            );
+            // ✅ Check if payment was actually successful
+            if (session.payment_status === "paid") {
+                // Update order payment status
+                const order = await orderModel
+                    .findOneAndUpdate(
+                        { stripeSessionId: session.id },
+                        {
+                            paymentStatus: "completed",
+                            orderStatus: "confirmed",
+                            stripePaymentIntentId: session.payment_intent,
+                        },
+                        { new: true }
+                    )
+                    .populate("userId", "name email");
 
-            if (!order) {
-                throw new ApiError(httpStatus.NOT_FOUND, "Order not found for this session");
+                if (!order) {
+                    console.error("Order not found for session:", session.id);
+                    throw new ApiError(httpStatus.NOT_FOUND, "Order not found for this session");
+                }
+
+                console.log("Order updated successfully:", order._id);
+
+                // Update product stock
+                for (const item of order.items) {
+                    await productModel.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } }, { new: true });
+                    console.log("Stock updated for product:", item.productId);
+                }
+
+                return order;
+            } else {
+                console.log("Payment not completed, status:", session.payment_status);
+                return null;
             }
+        }
 
-            // Update product stock (reduce stock by ordered quantities)
-            for (const item of order.items) {
-                await productModel.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } });
-            }
+        if (event.type === "checkout.session.async_payment_failed") {
+            const session = event.data.object;
+            console.log("Payment failed for session:", session.id);
+
+            const order = await orderModel
+                .findOneAndUpdate(
+                    { stripeSessionId: session.id },
+                    {
+                        paymentStatus: "failed",
+                        orderStatus: "cancelled",
+                    },
+                    { new: true }
+                )
+                .populate("userId", "name email");
 
             return order;
         }
 
+        console.log("Unhandled event type:", event.type);
         return null;
     } catch (error) {
-        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, "Webhook handling failed");
+        console.error("Error in handleStripeWebhook:", error);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Webhook handling failed`);
     }
 };
 

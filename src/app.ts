@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import router from "./app/routes";
 import notFound from "./app/errors/notFound";
 import globalErrorHandler from "./app/errors/globalErrorHandler";
+import { orderController } from "./app/modules/order/order.controllers";
 
 const app: Application = express();
 
@@ -15,6 +16,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+app.post("/api/v1/orders/webhook", express.raw({ type: "application/json" }), orderController.handleWebhook);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
