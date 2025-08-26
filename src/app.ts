@@ -25,7 +25,7 @@ app.use(cookieParser());
 
 app.get("/", (req: Request, res: Response) => {
     res.send({
-        message: "Massaging App Server Running",
+        message: "Stripe Payment Server Running",
     });
 });
 
