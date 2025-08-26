@@ -12,7 +12,7 @@ const globalErrorHandler_1 = __importDefault(require("./app/errors/globalErrorHa
 const order_controllers_1 = require("./app/modules/order/order.controllers");
 const app = (0, express_1.default)();
 const corsOptions = {
-    origin: ["http://localhost:3000", "https://messaging-app-client-eta.vercel.app"],
+    origin: ["http://localhost:3000", "https://stripe-implementation-client.vercel.app"],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,

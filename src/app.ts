@@ -9,7 +9,7 @@ import { orderController } from "./app/modules/order/order.controllers";
 const app: Application = express();
 
 const corsOptions = {
-    origin: ["http://localhost:3000", "https://messaging-app-client-eta.vercel.app"],
+    origin: ["http://localhost:3000", "https://stripe-implementation-client.vercel.app"],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
