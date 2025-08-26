@@ -20,6 +20,7 @@ const order_model_1 = require("./order.model");
 const stripe_1 = __importDefault(require("../../config/stripe"));
 const config_1 = __importDefault(require("../../config"));
 const auth_model_1 = __importDefault(require("../auth/auth.model"));
+const pdfkit_1 = __importDefault(require("pdfkit"));
 const createOrderIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
     const order = yield order_model_1.orderModel.create(payload);
     return order;
@@ -155,7 +156,19 @@ const handleStripeWebhook = (sig, body) => __awaiter(void 0, void 0, void 0, fun
 });
 const getOrdersByUserFromDB = (userId_1, ...args_1) => __awaiter(void 0, [userId_1, ...args_1], void 0, function* (userId, page = 1, limit = 10) {
     const skip = (page - 1) * limit;
-    const orders = yield order_model_1.orderModel.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limit).populate("items.productId", "name price images");
+    const orders = yield order_model_1.orderModel
+        .find({ userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+        path: "userId",
+        select: "name email image",
+    })
+        .populate({
+        path: "items.productId",
+        select: "name price discountPrice images description category stock",
+    });
     const total = yield order_model_1.orderModel.countDocuments({ userId });
     return {
         orders,
@@ -165,7 +178,10 @@ const getOrdersByUserFromDB = (userId_1, ...args_1) => __awaiter(void 0, [userId
     };
 });
 const getOrderByIdFromDB = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    const order = yield order_model_1.orderModel.findById(orderId).populate("userId", "name email").populate("items.productId", "name price images category");
+    const order = yield order_model_1.orderModel.findById(orderId).populate("userId", "name email").populate({
+        path: "items.productId",
+        select: "name price discountPrice images description category stock",
+    });
     if (!order) {
         throw new AppError_1.default(http_status_1.default.NOT_FOUND, "Order not found");
     }
@@ -185,6 +201,60 @@ const getOrderByStripeSessionIdFromDB = (stripeSessionId) => __awaiter(void 0, v
     }
     return order;
 });
+const generateInvoicePDF = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
+    const order = yield order_model_1.orderModel.findById(orderId).populate("userId", "name email").populate("items.productId", "name price discountPrice").exec();
+    if (!order) {
+        throw new AppError_1.default(http_status_1.default.NOT_FOUND, "Order not found");
+    }
+    // Type assertion for the populated order
+    const populatedOrder = order;
+    return new Promise((resolve, reject) => {
+        const doc = new pdfkit_1.default();
+        const chunks = [];
+        doc.on("data", (chunk) => chunks.push(chunk));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+        // Invoice header
+        doc.fontSize(20).text("INVOICE", 50, 50);
+        doc.fontSize(10).text(`Invoice #: ${populatedOrder.orderId || populatedOrder._id.toString()}`, 50, 80);
+        doc.text(`Date: ${new Date(populatedOrder.createdAt).toLocaleDateString()}`, 50, 95);
+        // Company info
+        doc.text("Your Store Name", 400, 50);
+        doc.fontSize(8).text("123 Store Street", 400, 65);
+        doc.text("City, State 12345", 400, 80);
+        doc.text("support@amarshop.com", 400, 95);
+        // Customer info
+        doc.fontSize(12).text("BILL TO:", 50, 130);
+        doc.fontSize(10).text(populatedOrder.userId.name, 50, 145);
+        doc.text(populatedOrder.userId.email, 50, 160);
+        // Order details
+        doc.fontSize(12).text("ORDER DETAILS:", 50, 190);
+        doc.text(`Order Status: ${populatedOrder.orderStatus}`, 50, 205);
+        doc.text(`Payment Status: ${populatedOrder.paymentStatus}`, 50, 220);
+        // Line items
+        let y = 250;
+        doc.fontSize(12).text("DESCRIPTION", 50, y);
+        doc.text("QTY", 250, y);
+        doc.text("PRICE", 350, y);
+        doc.text("TOTAL", 450, y);
+        y += 20;
+        populatedOrder.items.forEach((item) => {
+            const price = item.productId.discountPrice || item.productId.price;
+            const total = price * item.quantity;
+            doc.text(item.productId.name, 50, y);
+            doc.text(item.quantity.toString(), 250, y);
+            doc.text(`$${price.toFixed(2)}`, 350, y);
+            doc.text(`$${total.toFixed(2)}`, 450, y);
+            y += 15;
+        });
+        // Total
+        y += 20;
+        doc.fontSize(12).text(`Total: $${populatedOrder.totalAmount.toFixed(2)}`, 400, y);
+        // Payment method
+        doc.text(`Payment Method: ${populatedOrder.paymentMethod}`, 50, y + 30);
+        doc.end();
+    });
+});
 exports.orderServices = {
     createOrderIntoDB,
     createStripeCheckoutSession,
@@ -193,4 +263,5 @@ exports.orderServices = {
     getOrderByIdFromDB,
     updateOrderStatusInDB,
     getOrderByStripeSessionIdFromDB,
+    generateInvoicePDF,
 };

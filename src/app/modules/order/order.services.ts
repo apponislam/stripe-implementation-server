@@ -7,6 +7,7 @@ import { IOrder } from "./order.interface";
 import stripe from "../../config/stripe";
 import config from "../../config";
 import userModel from "../auth/auth.model";
+import PDFDocument from "pdfkit";
 
 const createOrderIntoDB = async (payload: Omit<IOrder, "createdAt" | "updatedAt">) => {
     const order = await orderModel.create(payload);
@@ -171,7 +172,19 @@ const handleStripeWebhook = async (sig: string, body: Buffer) => {
 const getOrdersByUserFromDB = async (userId: Types.ObjectId, page: number = 1, limit: number = 10) => {
     const skip = (page - 1) * limit;
 
-    const orders = await orderModel.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limit).populate("items.productId", "name price images");
+    const orders = await orderModel
+        .find({ userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+            path: "userId",
+            select: "name email image",
+        })
+        .populate({
+            path: "items.productId",
+            select: "name price discountPrice images description category stock",
+        });
 
     const total = await orderModel.countDocuments({ userId });
 
@@ -184,7 +197,10 @@ const getOrdersByUserFromDB = async (userId: Types.ObjectId, page: number = 1, l
 };
 
 const getOrderByIdFromDB = async (orderId: string) => {
-    const order = await orderModel.findById(orderId).populate("userId", "name email").populate("items.productId", "name price images category");
+    const order = await orderModel.findById(orderId).populate("userId", "name email").populate({
+        path: "items.productId",
+        select: "name price discountPrice images description category stock",
+    });
 
     if (!order) {
         throw new ApiError(httpStatus.NOT_FOUND, "Order not found");
@@ -213,6 +229,75 @@ const getOrderByStripeSessionIdFromDB = async (stripeSessionId: string) => {
     return order;
 };
 
+const generateInvoicePDF = async (orderId: string): Promise<Buffer> => {
+    const order = await orderModel.findById(orderId).populate("userId", "name email").populate("items.productId", "name price discountPrice").exec();
+
+    if (!order) {
+        throw new ApiError(httpStatus.NOT_FOUND, "Order not found");
+    }
+
+    // Type assertion for the populated order
+    const populatedOrder = order as any;
+
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument();
+        const chunks: Buffer[] = [];
+
+        doc.on("data", (chunk) => chunks.push(chunk));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        // Invoice header
+        doc.fontSize(20).text("INVOICE", 50, 50);
+        doc.fontSize(10).text(`Invoice #: ${populatedOrder.orderId || populatedOrder._id.toString()}`, 50, 80);
+        doc.text(`Date: ${new Date(populatedOrder.createdAt).toLocaleDateString()}`, 50, 95);
+
+        // Company info
+        doc.text("Your Store Name", 400, 50);
+        doc.fontSize(8).text("123 Store Street", 400, 65);
+        doc.text("City, State 12345", 400, 80);
+        doc.text("support@amarshop.com", 400, 95);
+
+        // Customer info
+        doc.fontSize(12).text("BILL TO:", 50, 130);
+        doc.fontSize(10).text(populatedOrder.userId.name, 50, 145);
+        doc.text(populatedOrder.userId.email, 50, 160);
+
+        // Order details
+        doc.fontSize(12).text("ORDER DETAILS:", 50, 190);
+        doc.text(`Order Status: ${populatedOrder.orderStatus}`, 50, 205);
+        doc.text(`Payment Status: ${populatedOrder.paymentStatus}`, 50, 220);
+
+        // Line items
+        let y = 250;
+        doc.fontSize(12).text("DESCRIPTION", 50, y);
+        doc.text("QTY", 250, y);
+        doc.text("PRICE", 350, y);
+        doc.text("TOTAL", 450, y);
+
+        y += 20;
+        populatedOrder.items.forEach((item: any) => {
+            const price = item.productId.discountPrice || item.productId.price;
+            const total = price * item.quantity;
+
+            doc.text(item.productId.name, 50, y);
+            doc.text(item.quantity.toString(), 250, y);
+            doc.text(`$${price.toFixed(2)}`, 350, y);
+            doc.text(`$${total.toFixed(2)}`, 450, y);
+            y += 15;
+        });
+
+        // Total
+        y += 20;
+        doc.fontSize(12).text(`Total: $${populatedOrder.totalAmount.toFixed(2)}`, 400, y);
+
+        // Payment method
+        doc.text(`Payment Method: ${populatedOrder.paymentMethod}`, 50, y + 30);
+
+        doc.end();
+    });
+};
+
 export const orderServices = {
     createOrderIntoDB,
     createStripeCheckoutSession,
@@ -221,4 +306,5 @@ export const orderServices = {
     getOrderByIdFromDB,
     updateOrderStatusInDB,
     getOrderByStripeSessionIdFromDB,
+    generateInvoicePDF,
 };

@@ -13,4 +13,6 @@ router.get("/my-orders", auth_1.default, order_controllers_1.orderController.get
 router.get("/:id", auth_1.default, order_controllers_1.orderController.getOrderById);
 router.get("/session/:sessionId", auth_1.default, order_controllers_1.orderController.getOrderBySessionId);
 // router.post("/webhook", express.raw({ type: "application/json" }), orderController.handleWebhook);
+router.get("/:id/invoice", auth_1.default, order_controllers_1.orderController.downloadInvoice);
+router.get("/:id/invoice/html", auth_1.default, order_controllers_1.orderController.downloadInvoiceHTML);
 exports.orderRoutes = router;
