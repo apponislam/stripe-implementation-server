@@ -1,0 +1,17 @@
+import express from "express";
+import auth from "../../middlewares/auth";
+import { orderController } from "./order.controllers";
+
+const router = express.Router();
+
+router.post("/create-checkout-session", auth, orderController.createCheckoutSession);
+
+router.get("/my-orders", auth, orderController.getOrdersByUser);
+
+router.get("/:id", auth, orderController.getOrderById);
+
+router.get("/session/:sessionId", auth, orderController.getOrderBySessionId);
+
+router.post("/webhook", auth, express.raw({ type: "application/json" }), orderController.handleWebhook);
+
+export const orderRoutes = router;
