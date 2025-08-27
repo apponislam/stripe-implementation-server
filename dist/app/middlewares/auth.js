@@ -22,7 +22,7 @@ const auth = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, voi
     if (token === null || token === void 0 ? void 0 : token.startsWith("Bearer "))
         token = token.slice(7);
     if (!token) {
-        throw new AppError_1.default(404, "Authentication failed: No token provided");
+        throw new AppError_1.default(401, "Authentication failed: No token provided");
     }
     let decoded;
     try {
