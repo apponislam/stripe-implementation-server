@@ -40,8 +40,8 @@ const loginUser = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0
     const result = yield auth_services_1.authServices.loginUser({ email, password });
     res.cookie("refreshToken", result.refreshToken, {
         httpOnly: true,
-        secure: config_1.default.node_env === "production",
-        sameSite: "strict",
+        secure: false,
+        sameSite: "lax",
         maxAge: (0, convertTime_1.convertTimeToMS)(config_1.default.jwt_refresh_expire),
     });
     (0, sendResponse_1.default)(res, {
