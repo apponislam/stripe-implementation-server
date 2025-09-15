@@ -33,8 +33,8 @@ const loginUser = catchAsync(async (req: Request, res: Response, next: NextFunct
 
     res.cookie("refreshToken", result.refreshToken, {
         httpOnly: true,
-        secure: false,
-        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: convertTimeToMS(config.jwt_refresh_expire),
     });
 
